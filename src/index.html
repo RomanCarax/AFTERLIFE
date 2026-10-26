@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>AFTERLIFE</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="terminal">
+    <!-- 헤더 (창 드래그 영역) -->
+    <header class="header" data-tauri-drag-region>
+      <div class="brand-wrap" data-tauri-drag-region>
+        <button class="menu-btn" id="btn-menu" title="메뉴 열기">
+          <svg viewBox="0 0 24 24" class="i-menu"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          <svg viewBox="0 0 24 24" class="i-close"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <div class="brand" data-tauri-drag-region>AFTERLIFE</div>
+      </div>
+      <div class="header-right" data-tauri-drag-region>
+        <button class="bg-btn" id="btn-background" title="백그라운드 재생 (창 숨기기 · 트레이에서 다시 열기)">
+          <svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
+        </button>
+        <span class="engine-dot" id="engine-dot" title="엔진 확인 중…"></span>
+        <span class="terminal-id" data-tauri-drag-region>AUDIO TERMINAL / 01</span>
+        <div class="win-ctrls" id="win-ctrls">
+          <button class="win-btn" id="win-min" title="최소화"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+          <button class="win-btn close" id="win-close" title="트레이로 숨기기 (백그라운드 재생 · 종료는 트레이 메뉴)"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 옆으로 열리는 메뉴 -->
+    <div class="drawer-backdrop" id="drawer-backdrop"></div>
+    <nav class="drawer" id="drawer">
+      <button class="nav-item" data-nav="search">
+        <svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="nav-name">SEARCH</span>
+      </button>
+      <button class="nav-item" data-nav="history">
+        <svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 8v4.5l3 2"/></svg>
+        <span class="nav-name">HISTORY</span>
+        <span class="nav-cnt" id="nav-history-cnt"></span>
+      </button>
+      <button class="nav-item" data-nav="playlist">
+        <svg viewBox="0 0 24 24"><path d="M4 6h11M4 11h11M4 16h7"/><circle cx="17.5" cy="17" r="2.5"/><path d="M20 17V9"/></svg>
+        <span class="nav-name">PLAYLIST</span>
+        <span class="nav-cnt" id="nav-pl-cnt"></span>
+        <svg viewBox="0 0 24 24" class="nav-chev"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <div class="nav-sub" id="nav-playlists"></div>
+      <button class="nav-item" data-nav="liked">
+        <svg viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z"/></svg>
+        <span class="nav-name">LIKED</span>
+        <span class="nav-cnt" id="nav-liked-cnt"></span>
+      </button>
+      <button class="nav-item" data-nav="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
+        <span class="nav-name">SETTINGS</span>
+      </button>
+    </nav>
+
+    <!-- 검색 -->
+    <form class="scan" id="scan-form">
+      <svg viewBox="0 0 24 24" class="scan-icon">
+        <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+      <input id="scan-input" type="text" placeholder="SCAN / SEARCH TRACK..." autocomplete="off" spellcheck="false" />
+      <button type="submit" class="scan-enter">[ ENTER ]</button>
+    </form>
+
+    <!-- 트랙 목록 -->
+    <main class="signals">
+      <div class="signals-head">
+        <span class="signals-title" id="signals-title">AVAILABLE SIGNALS</span>
+        <span class="signals-count" id="signals-count">00 TRACKS</span>
+      </div>
+      <ul class="track-list" id="track-list"></ul>
+    </main>
+
+    <!-- 하단 플레이어 -->
+    <footer class="deck">
+      <div class="deck-info">
+        <div>
+          <div class="deck-label" id="deck-label">STANDBY</div>
+          <div class="deck-title" id="deck-title">NO SIGNAL</div>
+        </div>
+        <div class="deck-time" id="deck-time">00:00 / 00:00</div>
+      </div>
+
+      <div class="progress" id="progress">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+
+      <div class="deck-controls">
+        <div class="transport">
+          <button class="ctl like" id="btn-like" title="좋아요 (L)">
+            <svg viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z"/></svg>
+          </button>
+          <button class="ctl play" id="btn-play" title="재생 / 일시정지 (Space)">
+            <svg viewBox="0 0 24 24" class="i-play"><circle cx="12" cy="12" r="9.5"/><path d="M10 8.5v7l5.5-3.5z"/></svg>
+            <svg viewBox="0 0 24 24" class="i-pause"><circle cx="12" cy="12" r="9.5"/><path d="M10 8.5v7M14 8.5v7"/></svg>
+            <svg viewBox="0 0 24 24" class="i-load"><circle cx="12" cy="12" r="9.5" stroke-dasharray="14 46"/></svg>
+          </button>
+          <button class="ctl repeat" id="btn-repeat" title="한 곡 반복 (R)">
+            <svg viewBox="0 0 24 24"><path d="M17 3l3 3-3 3"/><path d="M4 11V9a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 13v2a3 3 0 0 1-3 3H4"/></svg>
+          </button>
+        </div>
+
+        <div class="volume" id="volume"
+             title="휠: ±1 · Shift+휠: ±0.1 · 숫자를 눌러 직접 입력 (0.0 ~ 100.0)">
+          <button class="ctl vol-btn" id="btn-mute" title="음소거 (M)">
+            <svg viewBox="0 0 24 24" class="i-vol"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10"/></svg>
+            <svg viewBox="0 0 24 24" class="i-mute"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M16 10l4 4M20 10l-4 4"/></svg>
+          </button>
+          <input id="vol-input" class="vol-input" type="text" inputmode="decimal" value="50.0" maxlength="5" />
+          <span class="vol-unit">%</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <div class="popover" id="popover" hidden></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

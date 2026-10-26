@@ -1,0 +1,24 @@
+[package]
+name = "afterlife"
+version = "0.1.0"
+description = "AFTERLIFE - yt-dlp + libmpv music player"
+edition = "2021"
+
+[lib]
+name = "afterlife_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# yt-dlp 포터블 exe를 GitHub 릴리스에서 받아오기 (Windows 기본 TLS 사용)
+reqwest = { version = "0.12", features = ["json"] }
+sha2 = "0.10"
+# libmpv 포터블: GitHub에서 받은 .7z 를 풀고(sevenz-rust2), DLL을 실행 중에 불러 씀(libloading)
+sevenz-rust2 = "0.20"
+libloading = "0.8"
