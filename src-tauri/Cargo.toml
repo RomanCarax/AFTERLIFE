@@ -1,6 +1,6 @@
 [package]
 name = "afterlife"
-version = "0.1.2"
+version = "0.1.3"
 description = "AFTERLIFE - yt-dlp + libmpv music player"
 edition = "2021"
 
@@ -22,3 +22,7 @@ sha2 = "0.10"
 # libmpv 포터블: GitHub에서 받은 .7z 를 풀고(sevenz-rust2), DLL을 실행 중에 불러 씀(libloading)
 sevenz-rust2 = "0.20"
 libloading = "0.8"
+# yt-dlp 는 실행이 빠른 "미리 풀어 둔" 판(yt-dlp_win.zip)을 받아 풂
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# 오디오 주소 캐시: 같은 곡을 동시에 여러 번 뽑지 않게 (tauri 가 이미 쓰는 tokio)
+tokio = { version = "1", features = ["sync"] }

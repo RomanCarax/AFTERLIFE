@@ -8,8 +8,12 @@ const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 const Service = REAL ? { search: query => invoke('yt_search', { query }) } : MockService;
 
 // libmpv 플레이어 (Rust: player.rs). 미리보기에서는 null → 가짜 시계 사용
+const trackUrl = t => t.url || `https://www.youtube.com/watch?v=${t.id}`;
 const Player = REAL ? {
-  load: t => invoke('player_load', { url: t.url || `https://www.youtube.com/watch?v=${t.id}` }),
+  // mode: 'normal'(미리 뽑아 둔 주소 사용) · 'fresh'(새로 뽑기) · 'download'(yt-dlp 로 파일을 받아 재생)
+  load: (t, mode = 'normal') => invoke('player_load', { url: trackUrl(t), mode }),
+  // 오디오 주소를 미리 뽑아 둠 → 그 곡을 누르면 바로 시작 (Rust 캐시)
+  prefetch: t => invoke('yt_prefetch', { url: trackUrl(t) }).catch(() => {}),
   pause: paused => invoke('player_pause', { paused }),
   seek: pos => invoke('player_seek', { pos }),
   volume: volume => invoke('player_set_volume', { volume }),
@@ -259,7 +263,15 @@ function renderList() {
     li.querySelector('.remove')?.addEventListener('click', e => { e.stopPropagation(); removeFromSource(t); });
     const addBtn = li.querySelector('.add');
     addBtn.onclick = e => { e.stopPropagation(); openPlaylistMenu(addBtn, t); };
+    // 곡 위에 잠깐 머물면 주소를 미리 뽑아 둠 (누를 때 바로 시작)
+    let hoverTimer;
+    li.onmouseenter = () => {
+      if (!Player || current()?.id === t.id) return;
+      hoverTimer = setTimeout(() => Player.prefetch(t), 600); // 스쳐 지나갈 때는 요청 안 함
+    };
+    li.onmouseleave = () => clearTimeout(hoverTimer);
     li.onclick = () => {
+      clearTimeout(hoverTimer);
       if (current() && current().id === t.id) {
         // 이미 재생한 곡이어도 지금 보는 목록을 이어 재생 목록으로 (다른 목록에서 시작한 곡일 수 있음)
         state.queue = list.slice();
@@ -451,8 +463,10 @@ async function load() {
 
   if (REAL) {
     // Rust: yt-dlp 로 오디오 주소를 뽑아 libmpv 로 재생 → 준비되면 player://loaded
+    // 처음: 미리 뽑아 둔 주소 · 1번째 재시도: 새로 뽑기 · 2번째 재시도: 파일로 받아서 재생
+    const attempt = retry.id === t.id ? retry.n : 0;
     try {
-      await Player.load(t);
+      await Player.load(t, ['normal', 'fresh', 'download'][attempt] || 'download');
     } catch (err) {
       if (token !== loadToken) return;
       onLoadFailed(t, String(err)); // yt-dlp 주소 추출 실패 등
@@ -474,6 +488,7 @@ function onLoaded() {
   retry = { id: null, n: 0 };
   skippedInRow = 0;
   if (current()) addHistory(current());
+  prefetchNext();
   restoreEngineDot();
   updateDeck();
   refreshActive();
@@ -528,6 +543,14 @@ function onTrackEnd() {
 
 // 목록 이어 재생 중인가 (검색 결과에서 시작했거나 한 곡뿐이면 아님)
 const isContinuous = () => state.queueSource !== 'signals' && state.queue.length > 1;
+
+// 목록 이어 재생 중이면 다음 곡 주소를 미리 뽑아 둠 → 곡이 끝나면 바로 이어짐
+function prefetchNext() {
+  if (!Player || !isContinuous() || state.repeat === 'one') return;
+  const last = state.index >= state.queue.length - 1;
+  if (last && state.repeat !== 'all') return;
+  Player.prefetch(state.queue[last ? 0 : state.index + 1]);
+}
 
 // 다음 곡으로 (마지막 곡 뒤에는 전체 반복일 때만 첫 곡으로). 넘어갔으면 true
 function advanceQueue() {

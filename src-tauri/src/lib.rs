@@ -20,6 +20,7 @@ pub fn run() {
         .manage(player::PlayerState::default())
         .setup(|app| {
             player::init_log(app.handle());
+            ytdlp::clear_cache(app.handle()); // 지난번에 직접 받아 둔 오디오 파일 정리
             mpvlib::apply_pending(app.handle()); // 받아 둔 새 libmpv 가 있으면 불러오기 전에 교체
             tray::create(app.handle())?;
             Ok(())
@@ -37,6 +38,7 @@ pub fn run() {
             ytdlp::ytdlp_check,
             ytdlp::ytdlp_update,
             ytdlp::yt_search,
+            ytdlp::yt_prefetch,
             mpvlib::mpv_check,
             mpvlib::mpv_update,
             player::player_load,

@@ -318,28 +318,44 @@ impl PlayerState {
 
 /// 영상 주소를 받아 오디오 주소를 뽑고 재생. 도중에 다른 곡이 눌리면 Ok(false).
 #[tauri::command]
-pub async fn player_load(app: AppHandle, state: State<'_, PlayerState>, url: String) -> Result<bool, String> {
+pub async fn player_load(
+    app: AppHandle,
+    state: State<'_, PlayerState>,
+    url: String,
+    // "normal": 미리 뽑아 둔 주소가 있으면 사용 · "fresh": 새로 뽑기 · "download": yt-dlp 로 파일을 받아 재생
+    mode: Option<String>,
+) -> Result<bool, String> {
+    let mode = mode.as_deref().unwrap_or("normal").to_string();
     let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    log(format!("load #{gen}: {url}"));
+    log(format!("load #{gen}: {url} ({mode})"));
     let mpv = state.get_or_init(&app).inspect_err(|e| log(format!("load #{gen}: mpv 준비 실패: {e}")))?;
     mpv.command(&["stop"])?; // 주소를 뽑는 동안 이전 곡은 멈춤
 
-    let stream = ytdlp::resolve_stream(&app, &url)
-        .await
-        .inspect_err(|e| log(format!("load #{gen}: 주소 추출 실패: {e}")))?;
+    let started = Instant::now();
+    let (target, user_agent, duration, how) = if mode == "download" {
+        let path = ytdlp::download_audio(&app, &url)
+            .await
+            .inspect_err(|e| log(format!("load #{gen}: 파일 받기 실패: {e}")))?;
+        (path.display().to_string(), None, 0.0, "파일로 받음")
+    } else {
+        let (s, cached) = ytdlp::stream_for(&app, &url, mode == "fresh")
+            .await
+            .inspect_err(|e| log(format!("load #{gen}: 주소 추출 실패: {e}")))?;
+        (s.url, s.user_agent, s.duration, if cached { "캐시 사용" } else { "주소 추출" })
+    };
+    log(format!("load #{gen}: {how} ({:.2}초)", started.elapsed().as_secs_f32()));
     if state.generation.load(Ordering::SeqCst) != gen {
         log(format!("load #{gen}: 다른 곡이 눌려서 버림"));
         return Ok(false);
     }
-    if let Some(ua) = &stream.user_agent {
+    if let Some(ua) = &user_agent {
         let _ = mpv.set_prop("user-agent", ua);
     }
     mpv.set_prop("pause", "no")?;
-    mpv.command(&["loadfile", &stream.url, "replace"])
+    mpv.command(&["loadfile", &target, "replace"])
         .inspect_err(|e| log(format!("load #{gen}: loadfile 실패: {e}")))?;
-    log(format!("load #{gen}: 주소 추출 완료 → loadfile ({:.0}초)", stream.duration));
-    if stream.duration > 0.0 {
-        let _ = app.emit("player://duration", json!({ "duration": stream.duration }));
+    if duration > 0.0 {
+        let _ = app.emit("player://duration", json!({ "duration": duration }));
     }
     Ok(true)
 }
