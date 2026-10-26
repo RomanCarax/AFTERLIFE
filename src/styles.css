@@ -408,10 +408,18 @@ svg {
 .ctl.repeat:hover { filter: none; color: var(--text); }
 .ctl.repeat.on { color: var(--accent); }
 .ctl.repeat.on:hover { filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), .7)); }
+/* 전체 반복: 아래 점 · 한 곡 반복: 아래 작은 "1" */
 .ctl.repeat.on::after {
   content: ""; position: absolute; bottom: 1px; left: 50%;
   width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
   background: var(--accent);
+}
+.ctl.repeat.one::after {
+  content: "1"; bottom: -3px;
+  width: 10px; height: auto; margin-left: -5px; border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 10px; font-weight: 700; line-height: 1; text-align: center;
 }
 .ctl.play .i-pause, .ctl.play .i-load { display: none; }
 .ctl.play.is-playing .i-play { display: none; }

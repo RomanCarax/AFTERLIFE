@@ -114,7 +114,8 @@ const state = {
   playing: false,
   loading: false,
   position: 0,
-  repeat: false,              // 한 곡 반복
+  repeat: 'off',              // 반복: 'off' | 'all'(목록 전체) | 'one'(한 곡)
+  queueSource: 'signals',     // 재생을 시작한 목록 (검색 결과면 한 곡만, 그 외는 이어 재생)
 
   volume: VOLUME_DEFAULT,
   muted: false,
@@ -420,7 +421,8 @@ function clearScan() {
 
 /* ───────── 재생 ───────── */
 function playFrom(list, i) {
-  state.queue = list.slice();
+  state.queue = list.slice(); // 재생 중에 목록이 바뀌어도 순서는 그대로
+  state.queueSource = state.source;
   state.index = i;
   load();
 }
@@ -483,17 +485,37 @@ function togglePlay() {
   refreshActive();
 }
 
+// 반복 버튼: 끄기 → 전체 → 한 곡 → 끄기
+const REPEAT_NEXT = { off: 'all', all: 'one', one: 'off' };
+const REPEAT_LABEL = { off: 'REPEAT · OFF', all: 'REPEAT · ALL', one: 'REPEAT · ONE' };
+
 function toggleRepeat() {
-  state.repeat = !state.repeat;
-  Player?.loop(state.repeat);
+  state.repeat = REPEAT_NEXT[state.repeat];
+  Player?.loop(state.repeat === 'one'); // 한 곡 반복은 mpv 가 직접
   updateDeck();
-  toast(state.repeat ? 'REPEAT · ON' : 'REPEAT · OFF');
+  toast(REPEAT_LABEL[state.repeat]);
 }
 
-// 곡이 끝났을 때: 반복이면 처음부터, 아니면 정지 (다음 곡으로 넘어가지 않음)
+// 곡이 끝났을 때
+//   한 곡 반복: 처음부터 (실제 앱은 mpv loop-file 이 처리해서 여기까지 오지 않음)
+//   PLAYLIST · LIKED · HISTORY 에서 시작: 다음 곡 자동 재생, 마지막 곡 뒤에는 전체 반복이면 첫 곡, 아니면 정지
+//   검색 결과에서 시작: 그 곡만 (전체 반복이면 그 곡을 다시)
 function onTrackEnd() {
   const t = current();
-  if (state.repeat) { state.position = 0; return; }
+  if (state.repeat === 'one') { state.position = 0; return; }
+
+  if (state.queueSource !== 'signals' && state.queue.length > 1) {
+    const last = state.index >= state.queue.length - 1;
+    if (!last || state.repeat === 'all') {
+      state.index = last ? 0 : state.index + 1;
+      return load();
+    }
+  } else if (state.repeat === 'all') {
+    state.position = 0;
+    if (REAL) { Player.seek(0); Player.pause(false); } // keep-open 으로 끝에서 멈춰 있던 곡을 다시
+    return updateProgress();
+  }
+
   state.playing = false;
   state.position = t.duration;
   updateDeck();
@@ -546,7 +568,10 @@ function updateDeck() {
   const pb = $('#btn-play');
   pb.classList.toggle('is-playing', state.playing);
   pb.classList.toggle('is-loading', state.loading);
-  $('#btn-repeat').classList.toggle('on', state.repeat);
+  const rb = $('#btn-repeat');
+  rb.classList.toggle('on', state.repeat !== 'off');
+  rb.classList.toggle('one', state.repeat === 'one');
+  rb.title = { off: '반복: 꺼짐 (R)', all: '반복: 목록 전체 (R)', one: '반복: 한 곡 (R)' }[state.repeat];
   $('#btn-like').classList.toggle('on', !!t && isLiked(t));
 
   document.title = t ? `${t.title} — AFTERLIFE` : 'AFTERLIFE';
