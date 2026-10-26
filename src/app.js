@@ -16,6 +16,9 @@ const Player = REAL ? {
   loop: on => invoke('player_set_loop', { on }),
 } : null;
 
+// 재생 판단을 player.log 에 남김 (실제 앱만)
+const plog = msg => REAL && invoke('player_log', { msg }).catch(() => {});
+
 // Rust 오류 문자열을 토스트용으로 짧게
 const errText = e => String(e?.message || e).slice(0, 48);
 
@@ -213,6 +216,7 @@ function renderList() {
 
   const list = visibleList();
   const scanning = state.scanning && state.source === 'signals';
+  $('#btn-play-all').classList.toggle('show', state.source !== 'signals' && list.length > 0);
   $('#signals-count').textContent = scanning ? '-- TRACKS' : `${pad2(list.length)} TRACKS`;
 
   if (scanning) {
@@ -256,8 +260,13 @@ function renderList() {
     const addBtn = li.querySelector('.add');
     addBtn.onclick = e => { e.stopPropagation(); openPlaylistMenu(addBtn, t); };
     li.onclick = () => {
-      if (current() && current().id === t.id) togglePlay();
-      else playFrom(list, i);
+      if (current() && current().id === t.id) {
+        // 이미 재생한 곡이어도 지금 보는 목록을 이어 재생 목록으로 (다른 목록에서 시작한 곡일 수 있음)
+        state.queue = list.slice();
+        state.index = i;
+        state.queueSource = state.source;
+        togglePlay();
+      } else playFrom(list, i);
     };
     ul.append(li);
     setMarquee(li.querySelector('.title'), t.title);
@@ -424,6 +433,7 @@ function playFrom(list, i) {
   state.queue = list.slice(); // 재생 중에 목록이 바뀌어도 순서는 그대로
   state.queueSource = state.source;
   state.index = i;
+  skippedInRow = 0;
   load();
 }
 
@@ -445,11 +455,7 @@ async function load() {
       await Player.load(t);
     } catch (err) {
       if (token !== loadToken) return;
-      state.loading = false;
-      restoreEngineDot();
-      updateDeck();
-      refreshActive();
-      toast(`SIGNAL LOST · ${errText(err)}`);
+      onLoadFailed(t, String(err)); // yt-dlp 주소 추출 실패 등
     }
     return;
   }
@@ -465,6 +471,8 @@ function onLoaded() {
   if (!state.loading) return;
   state.loading = false;
   state.playing = true;
+  retry = { id: null, n: 0 };
+  skippedInRow = 0;
   if (current()) addHistory(current());
   restoreEngineDot();
   updateDeck();
@@ -502,24 +510,61 @@ function toggleRepeat() {
 //   검색 결과에서 시작: 그 곡만 (전체 반복이면 그 곡을 다시)
 function onTrackEnd() {
   const t = current();
+  plog(`곡 끝: #${state.index + 1}/${state.queue.length} ${t?.title} · 목록=${state.queueSource} · 반복=${state.repeat}`);
   if (state.repeat === 'one') { state.position = 0; return; }
+  if (advanceQueue()) return;
 
-  if (state.queueSource !== 'signals' && state.queue.length > 1) {
-    const last = state.index >= state.queue.length - 1;
-    if (!last || state.repeat === 'all') {
-      state.index = last ? 0 : state.index + 1;
-      return load();
-    }
-  } else if (state.repeat === 'all') {
+  if (state.repeat === 'all' && !isContinuous()) {
+    // 한 곡만 재생 중인 전체 반복: 그 곡을 다시
     state.position = 0;
     if (REAL) { Player.seek(0); Player.pause(false); } // keep-open 으로 끝에서 멈춰 있던 곡을 다시
     return updateProgress();
   }
-
   state.playing = false;
   state.position = t.duration;
   updateDeck();
   refreshActive();
+}
+
+// 목록 이어 재생 중인가 (검색 결과에서 시작했거나 한 곡뿐이면 아님)
+const isContinuous = () => state.queueSource !== 'signals' && state.queue.length > 1;
+
+// 다음 곡으로 (마지막 곡 뒤에는 전체 반복일 때만 첫 곡으로). 넘어갔으면 true
+function advanceQueue() {
+  if (!isContinuous()) return false;
+  const last = state.index >= state.queue.length - 1;
+  if (last && state.repeat !== 'all') return false;
+  state.index = last ? 0 : state.index + 1;
+  load();
+  return true;
+}
+
+/* 곡을 열지 못했을 때 (yt-dlp 주소 추출 실패 · mpv 열기 실패)
+   YouTube 가 가끔 일시적으로 거부하므로 주소를 새로 뽑아 최대 2번 다시 시도 →
+   그래도 안 되면 목록 이어 재생 중이면 건너뛰고 다음 곡, 아니면 멈춤 */
+const MAX_RETRY = 2;
+let retry = { id: null, n: 0 };
+let skippedInRow = 0; // 연속으로 건너뛴 곡 수 (목록 전체가 실패할 때 끝없이 돌지 않게)
+
+function onLoadFailed(t, message) {
+  if (retry.id !== t.id) retry = { id: t.id, n: 0 };
+  if (retry.n < MAX_RETRY) {
+    retry.n++;
+    plog(`다시 시도 ${retry.n}/${MAX_RETRY}: ${t.title} · ${message}`);
+    return load();
+  }
+  plog(`포기: ${t.title} · ${message}`);
+  state.loading = false;
+  state.playing = false;
+  restoreEngineDot();
+  updateDeck();
+  refreshActive();
+  if (skippedInRow < state.queue.length - 1 && advanceQueue()) {
+    skippedInRow++;
+    toast(`SKIPPED · ${errText(t.title)}`);
+  } else {
+    toast(`SIGNAL LOST · ${errText(message)}`);
+  }
 }
 
 function seekRatio(r) {
@@ -829,6 +874,11 @@ $('#btn-menu').onclick = () => setDrawer(!drawerOpen());
 $('#drawer-backdrop').onclick = () => setDrawer(false);
 document.querySelectorAll('.nav-item').forEach(b => (b.onclick = () => onNav(b.dataset.nav)));
 $('#btn-like').onclick = () => toggleLike(current());
+// PLAY ALL: 지금 보는 목록을 1번 곡부터 이어 재생
+$('#btn-play-all').onclick = () => {
+  const list = visibleList();
+  if (list.length) playFrom(list, 0);
+};
 $('#btn-play').onclick = togglePlay;
 $('#btn-repeat').onclick = toggleRepeat;
 $('#btn-mute').onclick = toggleMute;
@@ -949,6 +999,9 @@ if (tauri) {
   });
   tauri.event.listen('player://ended', () => current() && onTrackEnd());
   tauri.event.listen('player://error', ({ payload }) => {
+    const t = current();
+    if (t && state.loading) return onLoadFailed(t, `mpv: ${payload.message}`); // 여는 중 실패 → 재시도
+    plog(`mpv 재생 중 끊김: ${t?.title} · ${payload.message}`);
     state.loading = false;
     state.playing = false;
     restoreEngineDot();

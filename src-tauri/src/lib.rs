@@ -8,13 +8,18 @@ mod ytdlp;
 use tauri::WindowEvent;
 
 pub fn run() {
-    tauri::Builder::default()
-        // 이미 실행 중이면 새로 띄우지 않고 숨겨진 창을 다시 보여준다
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main(app);
-        }))
+    let builder = tauri::Builder::default();
+    // 이미 실행 중이면 새로 띄우지 않고 숨겨진 창을 다시 보여준다.
+    // 개발용 빌드에서는 끔: 설치해서 쓰는 AFTERLIFE 를 켜 둔 채로 시험할 수 있게
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        tray::show_main(app);
+    }));
+
+    builder
         .manage(player::PlayerState::default())
         .setup(|app| {
+            player::init_log(app.handle());
             mpvlib::apply_pending(app.handle()); // 받아 둔 새 libmpv 가 있으면 불러오기 전에 교체
             tray::create(app.handle())?;
             Ok(())
@@ -35,6 +40,7 @@ pub fn run() {
             mpvlib::mpv_check,
             mpvlib::mpv_update,
             player::player_load,
+            player::player_log,
             player::player_pause,
             player::player_seek,
             player::player_set_volume,

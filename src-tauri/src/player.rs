@@ -16,6 +16,40 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
+/* ───────── 진단 기록 ─────────
+   %LOCALAPPDATA%\com.afterlife.player\player.log (앱을 켤 때마다 새로 씀)
+   곡 불러오기 · mpv 이벤트 · 오류를 남겨서 재생 문제를 추적한다 */
+
+static LOG: Mutex<Option<std::fs::File>> = Mutex::new(None);
+static LOG_START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+pub fn init_log(app: &AppHandle) {
+    use tauri::Manager;
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if let Ok(f) = std::fs::File::create(dir.join("player.log")) {
+            *LOG.lock().unwrap() = Some(f);
+            LOG_START.get_or_init(Instant::now);
+        }
+    }
+}
+
+/// 프런트엔드 쪽 판단도 같은 기록에 남김
+#[tauri::command]
+pub fn player_log(msg: String) {
+    log(format!("ui: {msg}"));
+}
+
+fn log(msg: impl AsRef<str>) {
+    use std::io::Write;
+    let t = LOG_START.get().map(|s| s.elapsed().as_secs_f32()).unwrap_or(0.0);
+    if let Ok(mut g) = LOG.lock() {
+        if let Some(f) = g.as_mut() {
+            let _ = writeln!(f, "{t:8.2}  {}", msg.as_ref());
+        }
+    }
+}
+
 /* ───────── mpv C API (include/mpv/client.h, API 2.x) ───────── */
 
 type Handle = *mut c_void;
@@ -25,6 +59,7 @@ const FORMAT_DOUBLE: c_int = 5;
 
 const EVENT_NONE: c_int = 0;
 const EVENT_SHUTDOWN: c_int = 1;
+const EVENT_LOG_MESSAGE: c_int = 2;
 const EVENT_END_FILE: c_int = 7;
 const EVENT_FILE_LOADED: c_int = 8;
 const EVENT_PROPERTY_CHANGE: c_int = 22;
@@ -51,6 +86,15 @@ struct MpvEventProperty {
 
 #[repr(C)]
 #[allow(dead_code)] // C 구조체 모양을 맞추기 위한 필드
+struct MpvEventLogMessage {
+    prefix: *const c_char,
+    level: *const c_char,
+    text: *const c_char,
+    log_level: c_int,
+}
+
+#[repr(C)]
+#[allow(dead_code)] // C 구조체 모양을 맞추기 위한 필드
 struct MpvEventEndFile {
     reason: c_int,
     error: c_int,
@@ -65,6 +109,7 @@ struct Api {
     observe_property: unsafe extern "C" fn(Handle, u64, *const c_char, c_int) -> c_int,
     wait_event: unsafe extern "C" fn(Handle, f64) -> *mut MpvEvent,
     error_string: unsafe extern "C" fn(c_int) -> *const c_char,
+    request_log_messages: unsafe extern "C" fn(Handle, *const c_char) -> c_int,
 }
 
 impl Api {
@@ -78,6 +123,7 @@ impl Api {
             observe_property: *lib.get(b"mpv_observe_property\0")?,
             wait_event: *lib.get(b"mpv_wait_event\0")?,
             error_string: *lib.get(b"mpv_error_string\0")?,
+            request_log_messages: *lib.get(b"mpv_request_log_messages\0")?,
         })
     }
 }
@@ -124,6 +170,9 @@ impl Mpv {
         if rc < 0 {
             return Err(format!("mpv 초기화 실패: {}", mpv.err(rc)));
         }
+        // mpv 자체 경고·오류도 player.log 에 (열기 실패 원인 추적용)
+        let lvl = cstr("warn");
+        unsafe { (mpv.api.request_log_messages)(mpv.h, lvl.as_ptr()) };
         for (name, fmt) in [("time-pos", FORMAT_DOUBLE), ("duration", FORMAT_DOUBLE), ("eof-reached", FORMAT_FLAG)] {
             let n = cstr(name);
             unsafe { (mpv.api.observe_property)(mpv.h, 0, n.as_ptr(), fmt) };
@@ -163,11 +212,18 @@ impl Mpv {
                 match ev.event_id {
                     EVENT_NONE => continue,
                     EVENT_SHUTDOWN => break,
+                    EVENT_LOG_MESSAGE => {
+                        let m = unsafe { &*(ev.data as *const MpvEventLogMessage) };
+                        let s = |p: *const c_char| unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
+                        log(format!("mpv [{}] {}: {}", s(m.prefix), s(m.level), s(m.text).trim_end()));
+                    }
                     EVENT_FILE_LOADED => {
+                        log("mpv: FILE_LOADED → player://loaded");
                         let _ = app.emit("player://loaded", ());
                     }
                     EVENT_END_FILE => {
                         let end = unsafe { &*(ev.data as *const MpvEventEndFile) };
+                        log(format!("mpv: END_FILE reason={} error={} ({})", end.reason, end.error, self.err(end.error)));
                         match end.reason {
                             END_FILE_EOF => {
                                 let _ = app.emit("player://ended", ());
@@ -187,6 +243,7 @@ impl Mpv {
                         // keep-open 이라 곡 끝은 eof-reached 로 알 수 있다 (반복 중에는 오지 않음)
                         if p.format == FORMAT_FLAG {
                             if name == "eof-reached" && unsafe { *(p.data as *const c_int) } != 0 {
+                                log("mpv: eof-reached=1 → player://ended");
                                 let _ = app.emit("player://ended", ());
                             }
                             continue;
@@ -263,18 +320,24 @@ impl PlayerState {
 #[tauri::command]
 pub async fn player_load(app: AppHandle, state: State<'_, PlayerState>, url: String) -> Result<bool, String> {
     let gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    let mpv = state.get_or_init(&app)?;
+    log(format!("load #{gen}: {url}"));
+    let mpv = state.get_or_init(&app).inspect_err(|e| log(format!("load #{gen}: mpv 준비 실패: {e}")))?;
     mpv.command(&["stop"])?; // 주소를 뽑는 동안 이전 곡은 멈춤
 
-    let stream = ytdlp::resolve_stream(&app, &url).await?;
+    let stream = ytdlp::resolve_stream(&app, &url)
+        .await
+        .inspect_err(|e| log(format!("load #{gen}: 주소 추출 실패: {e}")))?;
     if state.generation.load(Ordering::SeqCst) != gen {
+        log(format!("load #{gen}: 다른 곡이 눌려서 버림"));
         return Ok(false);
     }
     if let Some(ua) = &stream.user_agent {
         let _ = mpv.set_prop("user-agent", ua);
     }
     mpv.set_prop("pause", "no")?;
-    mpv.command(&["loadfile", &stream.url, "replace"])?;
+    mpv.command(&["loadfile", &stream.url, "replace"])
+        .inspect_err(|e| log(format!("load #{gen}: loadfile 실패: {e}")))?;
+    log(format!("load #{gen}: 주소 추출 완료 → loadfile ({:.0}초)", stream.duration));
     if stream.duration > 0.0 {
         let _ = app.emit("player://duration", json!({ "duration": stream.duration }));
     }

@@ -255,6 +255,16 @@ svg {
 .set-btn { flex: none; color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .5px; }
 .set-btn:hover { text-shadow: 0 0 8px rgba(var(--accent-rgb), .6); }
 .signals-count { color: var(--text-dim); }
+.signals-right { display: flex; align-items: center; gap: 10px; flex: none; }
+
+/* PLAYLIST · LIKED · HISTORY 에서만 보임 */
+.play-all {
+  display: none;
+  color: var(--accent);
+  font-size: 13px; font-weight: 700; letter-spacing: .5px;
+}
+.play-all.show { display: block; }
+.play-all:hover { text-shadow: 0 0 8px rgba(var(--accent-rgb), .6); }
 
 .track-list { list-style: none; overflow-y: auto; flex: 1; padding-bottom: 8px; margin-right: -6px; padding-right: 6px; }
 
