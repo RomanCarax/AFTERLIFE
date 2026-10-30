@@ -150,7 +150,10 @@ pub async fn yt_search(app: AppHandle, query: String) -> Result<Vec<Track>, Stri
 #[derive(Clone)]
 pub struct Stream {
     pub url: String,
-    pub user_agent: Option<String>,
+    /// yt-dlp 가 알려 준 요청 헤더 전부 (User-Agent, Accept, Accept-Language, Sec-Fetch-Mode …)
+    pub headers: Vec<(String, String)>,
+    /// 오디오 파일 크기 (모르면 None → 중계 서버가 직접 알아냄)
+    pub filesize: Option<u64>,
     pub duration: f64,
 }
 
@@ -164,12 +167,14 @@ async fn resolve_stream(app: &AppHandle, page_url: &str) -> Result<Stream, Strin
         .and_then(Value::as_str)
         .ok_or("재생 가능한 오디오를 찾지 못함")?
         .to_string();
-    let user_agent = json
-        .pointer("/http_headers/User-Agent")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let headers = json
+        .get("http_headers")
+        .and_then(Value::as_object)
+        .map(|h| h.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+        .unwrap_or_default();
+    let filesize = json.get("filesize").and_then(Value::as_u64);
     let duration = json.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
-    Ok(Stream { url, user_agent, duration })
+    Ok(Stream { url, headers, filesize, duration })
 }
 
 /* 주소 캐시: 미리 뽑아 둔 주소를 만료 전까지 재사용 (다음 곡 · 마우스 올린 곡 · 다시 듣기)

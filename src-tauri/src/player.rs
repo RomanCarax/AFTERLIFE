@@ -7,7 +7,7 @@
 //   player://ended                  곡 끝 (반복 꺼짐일 때, 끝에서 멈춘 채로 남음)
 //   player://error   { message }
 
-use crate::{mpvlib, ytdlp};
+use crate::{mpvlib, proxy, ytdlp};
 use libloading::Library;
 use serde_json::json;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -40,7 +40,7 @@ pub fn player_log(msg: String) {
     log(format!("ui: {msg}"));
 }
 
-fn log(msg: impl AsRef<str>) {
+pub(crate) fn log(msg: impl AsRef<str>) {
     use std::io::Write;
     let t = LOG_START.get().map(|s| s.elapsed().as_secs_f32()).unwrap_or(0.0);
     if let Ok(mut g) = LOG.lock() {
@@ -332,24 +332,22 @@ pub async fn player_load(
     mpv.command(&["stop"])?; // 주소를 뽑는 동안 이전 곡은 멈춤
 
     let started = Instant::now();
-    let (target, user_agent, duration, how) = if mode == "download" {
+    let (target, duration, how) = if mode == "download" {
         let path = ytdlp::download_audio(&app, &url)
             .await
             .inspect_err(|e| log(format!("load #{gen}: 파일 받기 실패: {e}")))?;
-        (path.display().to_string(), None, 0.0, "파일로 받음")
+        (path.display().to_string(), 0.0, "파일로 받음")
     } else {
         let (s, cached) = ytdlp::stream_for(&app, &url, mode == "fresh")
             .await
             .inspect_err(|e| log(format!("load #{gen}: 주소 추출 실패: {e}")))?;
-        (s.url, s.user_agent, s.duration, if cached { "캐시 사용" } else { "주소 추출" })
+        // mpv 는 YouTube 대신 이 PC 의 중계 서버로 요청 (proxy.rs: 요청 헤더 전부 + 조각 요청)
+        (proxy::register(&s), s.duration, if cached { "캐시 사용" } else { "주소 추출" })
     };
     log(format!("load #{gen}: {how} ({:.2}초)", started.elapsed().as_secs_f32()));
     if state.generation.load(Ordering::SeqCst) != gen {
         log(format!("load #{gen}: 다른 곡이 눌려서 버림"));
         return Ok(false);
-    }
-    if let Some(ua) = &user_agent {
-        let _ = mpv.set_prop("user-agent", ua);
     }
     mpv.set_prop("pause", "no")?;
     mpv.command(&["loadfile", &target, "replace"])

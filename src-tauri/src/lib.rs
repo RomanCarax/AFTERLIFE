@@ -2,6 +2,7 @@ mod engine;
 mod fetch;
 mod mpvlib;
 mod player;
+mod proxy;
 mod tray;
 mod ytdlp;
 
@@ -21,6 +22,9 @@ pub fn run() {
         .setup(|app| {
             player::init_log(app.handle());
             ytdlp::clear_cache(app.handle()); // 지난번에 직접 받아 둔 오디오 파일 정리
+            if let Err(e) = proxy::start() {
+                player::log(format!("proxy: {e} → YouTube 주소를 mpv 가 직접 엶"));
+            }
             mpvlib::apply_pending(app.handle()); // 받아 둔 새 libmpv 가 있으면 불러오기 전에 교체
             tray::create(app.handle())?;
             Ok(())
